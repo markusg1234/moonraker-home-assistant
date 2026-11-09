@@ -345,6 +345,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         await api.stop()
         raise ConfigEntryNotReady(f"Error connecting to {url}:{port}") from exc
 
+    # Close the websocket when the entry unloads, or when setup fails from here on
+    entry.async_on_unload(api.stop)
+
     coordinator = MoonrakerDataUpdateCoordinator(
         hass, client=api, config_entry=entry, api_device_name=api_device_name
     )

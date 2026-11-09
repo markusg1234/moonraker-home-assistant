@@ -11,6 +11,7 @@ from custom_components.moonraker.const import PRINTSTATES
 
 import voluptuous as vol
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import (
@@ -852,6 +853,44 @@ async def test_failed_first_refresh(hass):
 
         with pytest.raises(ConfigEntryNotReady):
             assert await async_setup_entry(hass, config_entry)
+
+
+async def test_unload_and_reload_stop_api_client(hass):
+    """Unloading or reloading the entry closes its Moonraker connection."""
+    with patch(
+        "custom_components.moonraker.MoonrakerApiClient.stop", new_callable=AsyncMock
+    ) as mock_stop:
+        config_entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG, entry_id="test")
+        config_entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+        mock_stop.assert_not_awaited()
+
+        assert await hass.config_entries.async_reload(config_entry.entry_id)
+        await hass.async_block_till_done()
+        assert mock_stop.await_count == 1
+
+        assert await hass.config_entries.async_unload(config_entry.entry_id)
+        await hass.async_block_till_done()
+        assert mock_stop.await_count == 2
+
+
+async def test_failed_first_refresh_stops_api_client(hass):
+    """A failed first refresh closes the connection before setup is retried."""
+    with (
+        patch("moonraker_api.MoonrakerClient.call_method", side_effect=load_data),
+        patch(
+            "custom_components.moonraker.MoonrakerApiClient.stop",
+            new_callable=AsyncMock,
+        ) as mock_stop,
+    ):
+        config_entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG, entry_id="test")
+        config_entry.add_to_hass(hass)
+        assert not await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
+    mock_stop.assert_awaited_once()
 
 
 async def test_set_custom_gcode_service(hass):
